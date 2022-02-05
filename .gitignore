@@ -1,0 +1,5 @@
+# for jupyter notebook
+*/.ipynb_checkpoints/
+.ipynb_checkpoints/
+assignment1/cs231n/datasets/cifer-10-batches-py
+
