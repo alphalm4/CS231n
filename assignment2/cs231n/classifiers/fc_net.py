@@ -101,6 +101,11 @@ class FullyConnectedNet(object):
                 if i is not self.num_layers-1 : 
                     self.params['gamma' + str(i+1)] = np.ones(_size_list[i+1])
                     self.params['beta' + str(i+1)] = np.zeros(_size_list[i+1])
+            
+            if self.normalization == "layernorm":
+                if i is not self.num_layers-1 : 
+                    self.params['gamma' + str(i+1)] = np.ones(_size_list[i+1])
+                    self.params['beta' + str(i+1)] = np.zeros(_size_list[i+1])
 
         #print('size check :')
         #for key, value in self.params.items():
@@ -208,6 +213,9 @@ class FullyConnectedNet(object):
         if self.normalization == "batchnorm":
             bn_out = []
             bn_cache = []
+        if self.normalization == "layernorm":
+            ln_out = []
+            ln_cache = []
         relu_out = []
         relu_cache = []
         # do_out = []
@@ -229,6 +237,11 @@ class FullyConnectedNet(object):
                 out_i, cache_i = batchnorm_forward(out_i, self.params['gamma'+str(i+1)], self.params['beta'+str(i+1)], self.bn_params[i])
                 bn_out.append(out_i)
                 bn_cache.append(cache_i)
+            
+            if self.normalization == "layernorm":
+                out_i, cache_i = layernorm_forward(out_i, self.params['gamma'+str(i+1)], self.params['beta'+str(i+1)], self.bn_params[i])
+                ln_out.append(out_i)
+                ln_cache.append(cache_i)
 
             out_i, cache_i = relu_forward(out_i)
             relu_out.append(out_i)
@@ -288,6 +301,9 @@ class FullyConnectedNet(object):
           dout = relu_backward(dout, relu_cache[i])
           if self.normalization == "batchnorm":
              dout, grads['gamma'+str(i+1)], grads['beta'+str(i+1)] = batchnorm_backward_alt(dout, bn_cache[i])
+          if self.normalization == "layernorm":
+             dout, grads['gamma'+str(i+1)], grads['beta'+str(i+1)] = layernorm_backward(dout, ln_cache[i])
+
           dout, grads['W'+str(i+1)], grads['b'+str(i+1)] = affine_backward(dout, aff_cache[i])
 
 

@@ -399,17 +399,21 @@ def layernorm_forward(x, gamma, beta, ln_param):
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
     # ===========same with batchnorm_forward============
+    # ===========except of DIMENSION====================
 
-    # Calculate mean & var for x for each dimension
-    batch_mean = np.mean(x, axis=0) # (D,)
-    batch_var = np.var(x, axis=0) # (D,)
+    # Layer Norm : Normalization through DIMENSION
+    x = x.T #(D,N)
+
+    # Calculate mean & var for x for each N
+    batch_mean = np.mean(x, axis=0) # (N,)
+    batch_var = np.var(x, axis=0) # (N,)
 
     # Calculate out
     x_centered = x - batch_mean
     inv_stdev = 1. / np.sqrt(batch_var + eps)
 
-    xhat = x_centered * inv_stdev
-    out  = gamma * xhat + beta
+    xhat = x_centered * inv_stdev # (D,N)
+    out  = gamma * xhat.T + beta # (N,D) xhat transposed
     cache = (x, gamma, beta, batch_mean, batch_var, x_centered, inv_stdev, xhat)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
@@ -445,13 +449,18 @@ def layernorm_backward(dout, cache):
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
     x, gamma, beta, batch_mean, batch_var, x_centered, inv_stdev, xhat = cache
-    N = x.shape[0]
-
-    dxhat = dout * gamma
-    dx = (inv_stdev/N) * (N*dxhat - np.sum(dxhat * xhat, axis=0) * xhat - np.sum(dxhat, axis=0))
-    dgamma = np.sum(dout * xhat, axis=0)
+    
+    dgamma = np.sum(dout * xhat.T, axis=0)
     dbeta  = np.sum(dout, axis=0)
+    
+    dxhat = dout * gamma
+    
+    dout, dxhat = dout.T, dxhat.T
+    N = x.shape[0] # which, is actually D
 
+    dx = (inv_stdev/N) * (N*dxhat - np.sum(dxhat * xhat, axis=0) * xhat - np.sum(dxhat, axis=0))
+
+    dx = dx.T # (N,D)
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
