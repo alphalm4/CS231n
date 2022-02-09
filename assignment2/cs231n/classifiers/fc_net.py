@@ -74,6 +74,8 @@ class FullyConnectedNet(object):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
+
+        '''
         if self.num_layers is 2 : # hiddem_dims = [50]
             self.params['W1'] = np.random.normal(0.0, weight_scale, size=(input_dim, hidden_dims[0]))
             self.params['W2'] = np.random.normal(0.0, weight_scale, size=(hidden_dims[0], num_classes))
@@ -83,6 +85,7 @@ class FullyConnectedNet(object):
 
             self.params['gamma1'] = np.ones(hidden_dims[0])
             self.params['beta1'] = np.zeros(hidden_dims[0])
+        '''
 
 
         _size_list = []
@@ -218,8 +221,9 @@ class FullyConnectedNet(object):
             ln_cache = []
         relu_out = []
         relu_cache = []
-        # do_out = []
-        # do_cache = []
+        if self.use_dropout:
+            do_out = []
+            do_cache = []
         
         for i in range(self.num_layers):  # len(hidden_dims) = 2 → i = 0, 1, 2
           
@@ -247,9 +251,10 @@ class FullyConnectedNet(object):
             relu_out.append(out_i)
             relu_cache.append(cache_i)
             
-            # out_i, cache_i = dropout_forward()
-            # do_out.append(out_i)
-            # do_cache.append(cache_i)
+            if self.use_dropout:
+                out_i, cache_i = dropout_forward(out_i, self.dropout_param)
+                do_out.append(out_i)
+                do_cache.append(cache_i)
                     
           in_i = out_i
 
@@ -297,12 +302,16 @@ class FullyConnectedNet(object):
         dout, grads['W'+str(self.num_layers)], grads['b'+str(self.num_layers)] = affine_backward(dscores, aff_cache[-1])
         
         for i in reversed(range(self.num_layers-1)) : 
-          # additional line for dropout
+          
+          if self.use_dropout:
+              dout = dropout_backward(dout, do_cache[i])
+
           dout = relu_backward(dout, relu_cache[i])
+
           if self.normalization == "batchnorm":
-             dout, grads['gamma'+str(i+1)], grads['beta'+str(i+1)] = batchnorm_backward_alt(dout, bn_cache[i])
+              dout, grads['gamma'+str(i+1)], grads['beta'+str(i+1)] = batchnorm_backward_alt(dout, bn_cache[i])
           if self.normalization == "layernorm":
-             dout, grads['gamma'+str(i+1)], grads['beta'+str(i+1)] = layernorm_backward(dout, ln_cache[i])
+              dout, grads['gamma'+str(i+1)], grads['beta'+str(i+1)] = layernorm_backward(dout, ln_cache[i])
 
           dout, grads['W'+str(i+1)], grads['b'+str(i+1)] = affine_backward(dout, aff_cache[i])
 
