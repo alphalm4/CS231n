@@ -592,7 +592,43 @@ def conv_forward_naive(x, w, b, conv_param):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    N, C, H, W = x.shape
+    F, CC, HH, WW = w.shape
+    stride = int(conv_param['stride'])
+    pad = int(conv_param['pad'])
+
+    # check C = CC
+    if C != CC :
+      return "ERROR : channel depth of x and w is not equal"
+
+    xpad = np.zeros( (N, C, H + 2*pad, W + 2*pad) )
+    xpad[:, :, pad:-pad, pad:-pad] = x
+
+    Hout = 1 + (H + 2*pad - HH) / stride
+    Wout = 1 + (W + 2*pad - WW) / stride
+
+    # check Hout and Wout are integers
+    if Hout.is_integer() and Wout.is_integer() :
+      pass
+    else : 
+      return "H or W of output is not integer"
+    
+    Hout, Wout = int(Hout), int(Wout)
+    out = np.zeros( (N, F, Hout, Wout) )
+    
+    # First Approach
+    '''
+    for n in range(N):
+      for i in range(Hout) :
+        for j in range(Wout) :
+          for f in range(F) :
+            out[n,f,i,j] = np.sum(xpad[n, :, i*stride:i*stride+HH, j*stride:j*stride+WW] * w[f, :, :, :]) + b[f]
+    '''
+
+    for n in range(N):
+      for i in range(Hout) :
+        for j in range(Wout) :
+          out[n,:,i,j] = np.sum(xpad[n, :, i*stride:i*stride+HH, j*stride:j*stride+WW] * w, axis=(1,2,3)) + b
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -606,13 +642,13 @@ def conv_backward_naive(dout, cache):
     """A naive implementation of the backward pass for a convolutional layer.
 
     Inputs:
-    - dout: Upstream derivatives.
+    - dout: Upstream derivatives. (N, F, Hout=H', Wout=W')
     - cache: A tuple of (x, w, b, conv_param) as in conv_forward_naive
 
     Returns a tuple of:
-    - dx: Gradient with respect to x
-    - dw: Gradient with respect to w
-    - db: Gradient with respect to b
+    - dx: Gradient with respect to x (N, C, H, W)
+    - dw: Gradient with respect to w (F, C, HH, WW)
+    - db: Gradient with respect to b (F, )
     """
     dx, dw, db = None, None, None
     ###########################################################################
@@ -620,7 +656,32 @@ def conv_backward_naive(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, w, b, conv_param = cache
+
+    N, F, Hout, Wout = dout.shape
+    _, C, H, W = x.shape
+    _, _, HH, WW = w.shape
+    stride = int(conv_param['stride'])
+    pad = int(conv_param['pad'])
+
+    xpad = np.zeros( (N, C, H + 2*pad, W + 2*pad) )
+    xpad[:, :, pad:-pad, pad:-pad] = x
+    
+    dxpad = np.zeros_like(xpad)
+    dx = np.zeros_like(x)
+    dw = np.zeros_like(w)
+    db = np.sum(dout, axis = (0,2,3))
+
+    for n in range(N):
+      for f in range(F):
+        for i in range(Hout):
+          for j in range(Wout):
+            
+            dxpad[n, :, i*stride:i*stride+HH, j*stride:j*stride+WW] += dout[n,f,i,j]*w[f,:,:,:]
+            dw[f,:,:,:] += dout[n,f,i,j] * xpad[n, :, i*stride:i*stride+HH, j*stride:j*stride+WW]
+
+    dx = dxpad[:, :, pad:-pad, pad:-pad]
+
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -655,7 +716,26 @@ def max_pool_forward_naive(x, pool_param):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    N, C, H, W = x.shape
+    pool_height = int(pool_param['pool_height'])
+    pool_width  = int(pool_param['pool_width'])
+    stride      = int(pool_param['stride'])
+
+    Hout = 1 + (H - pool_height) / stride
+    Wout = 1 + (W - pool_width) / stride
+    
+    # check whether Hout and Wout are integer
+    if Hout.is_integer() and Wout.is_integer() :
+      pass
+    else : 
+      return "H or W of output is not integer"
+    
+    Hout, Wout = int(Hout), int(Wout)
+    out = np.zeros( (N, C, Hout, Wout) )
+
+    for i in range(Hout) :
+      for j in range(Wout) :
+        out[:,:,i,j] = np.amax(x[:, :, i*stride:i*stride+pool_height, j*stride:j*stride+pool_width], axis=(2,3))
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -681,7 +761,26 @@ def max_pool_backward_naive(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, pool_param = cache
+
+    N, C, H, W = x.shape
+    pool_height = int(pool_param['pool_height'])
+    pool_width  = int(pool_param['pool_width'])
+    stride      = int(pool_param['stride'])
+
+    Hout = 1 + (H - pool_height) / stride
+    Wout = 1 + (W - pool_width) / stride
+    Hout, Wout = int(Hout), int(Wout)
+
+    dx = np.zeros_like(x)
+
+    for n in range(N) :
+      for c in range(C) :
+        for i in range(Hout) :
+          for j in range(Wout) :
+            ind = np.unravel_index(np.argmax(x[n, c, i*stride:i*stride+pool_height, j*stride:j*stride+pool_width], axis=None), (pool_height, pool_width))
+            dx[n, c, i*stride + ind[0],j*stride + ind[1]] = dout[n, c, i, j]
+
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
