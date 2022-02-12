@@ -449,7 +449,8 @@ def layernorm_backward(dout, cache):
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
     x, gamma, beta, batch_mean, batch_var, x_centered, inv_stdev, xhat = cache
-    
+    # here, x has (D,N), not (N,D)
+
     dgamma = np.sum(dout * xhat.T, axis=0)
     dbeta  = np.sum(dout, axis=0)
     
@@ -821,8 +822,14 @@ def spatial_batchnorm_forward(x, gamma, beta, bn_param):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
-
+    # modify the shape : (N,C,H,W) → (N,H,W,C) → (N*H*W, C) == (N', D) in ref. batch normalization
+    # output dimension should be (N*H*W, C)→ (N,H,W,C) →(N,C,H,W)
+    
+    N,C,H,W = x.shape
+    x_bn = x.transpose(0,2,3,1).reshape(-1, C)
+    out_bn, cache = batchnorm_forward(x_bn, gamma, beta, bn_param) # Caches are refer to (N', D)
+    out = out_bn.reshape(N,H,W,C).transpose(0,3,1,2)
+    
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
@@ -853,8 +860,12 @@ def spatial_batchnorm_backward(dout, cache):
     # Your implementation should be very short; ours is less than five lines. #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    
+    N,C,H,W = dout.shape
+    dout_bn = dout.transpose(0,2,3,1).reshape(-1, C)
 
-    pass
+    dx_bn, dgamma, dbeta = batchnorm_backward(dout_bn, cache)
+    dx = dx_bn.reshape(N,H,W,C).transpose(0,3,1,2)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -894,8 +905,54 @@ def spatial_groupnorm_forward(x, gamma, beta, G, gn_param):
     # and layer normalization!                                                #
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    
+    N, C, H, W = x.shape
+    assert (C/G).is_integer(), "C/G is not an integer"
 
-    pass
+    x_gn = x.reshape(N, G, C//G, H, W)
+    out_gn = np.zeros_like(x_gn)
+
+    # Initialization empty lists for iteration below
+    x_ln = [None] * G
+    group_mean = [None] * G
+    group_var  = [None] * G
+    x_ln_centered = [None] * G
+    inv_stdev = [None] * G
+    x_ln_hat = [None] * G
+
+    # Layernorm iteration
+    for i in range(G):
+      x_ln[i] = x_gn[:,i,:,:,:].transpose(1,2,3,0).reshape(-1,N) # ((C/G)*H*W, N)
+
+      group_mean[i] = np.mean(x_ln[i], axis=0)  #(N,)
+      group_var[i] = np.var(x_ln[i], axis=0)  #(N,)
+
+      x_ln_centered[i] = x_ln[i] - group_mean[i]
+      inv_stdev[i] = 1. / np.sqrt(group_var[i] + eps)
+
+      x_ln_hat[i] = x_ln_centered[i] * inv_stdev[i]  # ((C/G)*H*W, N)
+      out_gn[:,i,:,:,:] = x_ln_hat[i].reshape(C//G, H, W, N).transpose(3,0,1,2)
+
+    out = gamma*out_gn.reshape(N,C,H,W) + beta
+    cache = (x, gamma, beta, G, x_ln, group_mean, group_var, x_ln_centered, inv_stdev, x_ln_hat)
+    '''
+    ref : layernorm_forward
+    # Layer Norm : Normalization through DIMENSION
+    x = x.T #(D,N)
+
+    # Calculate mean & var for x for each N
+    batch_mean = np.mean(x, axis=0) # (N,)
+    batch_var = np.var(x, axis=0) # (N,)
+
+    # Calculate out
+    x_centered = x - batch_mean
+    inv_stdev = 1. / np.sqrt(batch_var + eps)
+
+    xhat = x_centered * inv_stdev # (D,N)
+    out  = gamma * xhat.T + beta # (N,D) xhat transposed
+    cache = (x, gamma, beta, batch_mean, batch_var, x_centered, inv_stdev, xhat)
+    '''
+
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
@@ -924,8 +981,51 @@ def spatial_groupnorm_backward(dout, cache):
     ###########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    x, gamma, beta, G, x_ln, group_mean, group_var, x_ln_centered, inv_stdev, x_ln_hat = cache
+    N, C, H, W = x.shape
 
+    dout = dout.reshape(N, G, C//G, H, W)
+    dx = np.zeros_like(dout)
+    dgamma = np.zeros((G, C//G))
+    dbeta  = np.zeros((G, C//G))
+    gamma_ln = gamma.reshape(G, C//G)
+
+    # calculate grads refer to layernorm
+    for i in range(G):
+      dgamma[i,:] = np.sum(dout[:,i,:,:,:] * x_ln_hat[i].reshape(C//G, H, W, N).transpose(3,0,1,2), axis=(0,2,3))
+      dbeta[i,:]  = np.sum(dout[:,i,:,:,:], axis = (0,2,3))
+    dgamma = dgamma.reshape(1,C,1,1)
+    dbeta = dbeta.reshape(1,C,1,1)
+    
+    for i in range(G):
+      dout_ln = dout[:,i,:,:,:].transpose(1,2,3,0) # ((C/G), H, W, N)
+      dx_ln_hat = dout_ln * gamma_ln[i,:].reshape(-1,1,1,1)
+
+      dout_ln = dout_ln.reshape(-1,N) # ((C/G)*H*W, N) = (D,N)
+      dx_ln_hat = dx_ln_hat.reshape(-1,N) # ((C/G)*H*W, N) = (D,N)
+      D = dout_ln.shape[0]
+
+      dx_ln = (inv_stdev[i]/D) * (D*dx_ln_hat - np.sum(dx_ln_hat * x_ln_hat[i], axis=0) * x_ln_hat[i] - np.sum(dx_ln_hat, axis=0))
+      dx[:,i,:,:,:] = dx_ln.reshape(C//G, H, W, N).transpose(3,0,1,2)
+   
+    dx = dx.reshape(N, C, H, W)
+    '''
+    ref : layernorm_backward
+    x, gamma, beta, batch_mean, batch_var, x_centered, inv_stdev, xhat = cache
+    # here, x has (D,N), not (N,D)
+
+    dgamma = np.sum(dout * xhat.T, axis=0)
+    dbeta  = np.sum(dout, axis=0)
+    
+    dxhat = dout * gamma
+    
+    dout, dxhat = dout.T, dxhat.T
+    N = x.shape[0] # which, is actually D
+
+    dx = (inv_stdev/N) * (N*dxhat - np.sum(dxhat * xhat, axis=0) * xhat - np.sum(dxhat, axis=0))
+
+    dx = dx.T # (N,D)
+    '''
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ###########################################################################
     #                             END OF YOUR CODE                            #
