@@ -99,7 +99,7 @@ class CaptioningRNN:
         # by one relative to each other because the RNN should produce word (t+1)
         # after receiving word t. The first element of captions_in will be the START
         # token, and the first element of captions_out will be the first word.
-        captions_in = captions[:, :-1]
+        captions_in = captions[:, :-1] # (N,T)
         captions_out = captions[:, 1:]
 
         # You'll need this
@@ -148,7 +148,47 @@ class CaptioningRNN:
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        ###########
+        # Forward #
+        ###########
+        # (1) affine transformation : image features (N,D) → initial hidden state (N,H)
+        # Transform CNN image feature to be the initial hidden state.
+        H_initial, cache_initial = affine_forward(features, W_proj, b_proj)
+
+        # (2) word embedding layer : words in captions_in from indices to vectors (N,T,W)
+        embedded_captions, cache_embedded = word_embedding_forward(captions_in, W_embed)
+
+        # (3) Vanilla RNN : input word vectors → (N,T,H)
+        if self.cell_type == 'rnn':
+            rnn_out, cache_rnn = rnn_forward(embedded_captions, H_initial, Wx, Wh, b)
+        #elif self.cell_type == 'lstm':
+        #    rnn_out, cache_rnn = lstm_forward(embedded_captions, H_initial, Wx, Wh, b)
+
+        # (4) (temporal) affine transformation → scores at every time step (N, T, V)
+        scores, cache_scores = temporal_affine_forward(rnn_out, W_vocab, b_vocab)
+
+        # (5) (temporal) softmax : comparing scores and captions_out
+        loss, dsoftmax = temporal_softmax_loss(scores, captions_out, mask)
+
+        ############
+        # Backward #
+        ############
+        # (5), (4)
+        dscores, dW_vocab, db_vocab = temporal_affine_backward(dsoftmax, cache_scores)
+        grads['W_vocab'], grads['b_vocab'] = dW_vocab, db_vocab
+
+        # (3)
+        if self.cell_type == 'rnn':
+            dx, dh0, dWx, dWh, db = rnn_backward(dscores, cache_rnn)
+            grads['b'], grads['Wh'], grads['Wx'] = db, dWh, dWx
+        
+        # (2)
+        dW_embed = word_embedding_backward(dx, cache_embedded)
+        grads['W_embed'] = dW_embed
+
+        # (1)
+        dx_initial, dW_proj, db_proj = affine_backward(dh0, cache_initial)
+        grads['W_proj'], grads['b_proj'] = dW_proj, db_proj
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
