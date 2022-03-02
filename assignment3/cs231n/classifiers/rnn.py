@@ -1,3 +1,4 @@
+from re import X
 import numpy as np
 
 from ..rnn_layers import *
@@ -67,6 +68,7 @@ class CaptioningRNN:
         self.params["Wx"] /= np.sqrt(wordvec_dim)
         self.params["Wh"] = np.random.randn(hidden_dim, dim_mul * hidden_dim)
         self.params["Wh"] /= np.sqrt(hidden_dim)
+        
         self.params["b"] = np.zeros(dim_mul * hidden_dim)
 
         # Initialize output to vocab weights
@@ -151,20 +153,27 @@ class CaptioningRNN:
         ###########
         # Forward #
         ###########
+        # Dimensions : 
+        # W_embed : (V,W) / W_proj : (D,H) / Wx : (W,H) / Wh : (H,H) / W_vocab : (H,V)
+        # For one image, we have one feature vector (D,) and one caption_in vector (T,)
+        # Using RNN, we compute scores (T,) using features and captions
+        # Compare scores and captions_out using softmax loss
+
         # (1) affine transformation : image features (N,D) → initial hidden state (N,H)
         # Transform CNN image feature to be the initial hidden state.
-        H_initial, cache_initial = affine_forward(features, W_proj, b_proj)
+        h0, cache_initial = affine_forward(features, W_proj, b_proj)
 
-        # (2) word embedding layer : words in captions_in from indices to vectors (N,T,W)
-        embedded_captions, cache_embedded = word_embedding_forward(captions_in, W_embed)
+        # (2) word embedding layer : words in captions_in (N,T) from indices to vectors x=(N,T,W)
+        # Here, embedding transformation W_embed is subject to be trained.
+        x, cache_embedded = word_embedding_forward(captions_in, W_embed)
 
-        # (3) Vanilla RNN : input word vectors → (N,T,H)
+        # (3) Vanilla RNN : input word vectors → rnn_out (N,T,H)
         if self.cell_type == 'rnn':
-            rnn_out, cache_rnn = rnn_forward(embedded_captions, H_initial, Wx, Wh, b)
+            rnn_out, cache_rnn = rnn_forward(x, h0, Wx, Wh, b)
         #elif self.cell_type == 'lstm':
-        #    rnn_out, cache_rnn = lstm_forward(embedded_captions, H_initial, Wx, Wh, b)
+        #    rnn_out, cache_rnn = lstm_forward(x, h0, Wx, Wh, b)
 
-        # (4) (temporal) affine transformation → scores at every time step (N, T, V)
+        # (4) (temporal) affine transformation : compute scores at every time step (N, T, V)
         scores, cache_scores = temporal_affine_forward(rnn_out, W_vocab, b_vocab)
 
         # (5) (temporal) softmax : comparing scores and captions_out
@@ -223,6 +232,7 @@ class CaptioningRNN:
         """
         N = features.shape[0]
         captions = self._null * np.ones((N, max_length), dtype=np.int32)
+        # self._null : index which represents <NULL> token
 
         # Unpack parameters
         W_proj, b_proj = self.params["W_proj"], self.params["b_proj"]
@@ -256,7 +266,38 @@ class CaptioningRNN:
         ###########################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        ###########
+        # Forward #
+        ###########
+        # Dimensions : 
+        # W_embed : (V,W) / W_proj : (D,H) / Wx : (W,H) / Wh : (H,H) / W_vocab : (H,V)
+        # For one image, we have one feature vector (D,) and one caption_in vector (T,)
+        # Using RNN, we compute scores (T,) using features and captions
+        # Compare scores and captions_out using softmax loss
+
+        # (0) Initialize h0 (N,T) using input image features (N,D)
+        T = max_length
+        h_in, _ = affine_forward(features, W_proj, b_proj)
+        captions0 = self._start * np.ones(N, dtype=np.int32) # (N,t=0)
+
+        for t in range(T):
+          # (1) embed the previous word using learned word embeddings
+          x_in, _ = word_embedding_forward(captions0, W_embed) # (N,t=0,W)
+
+          # (2) RNN step forward to get the next (temporal) hidden state (N,H)
+          if self.cell_type == 'rnn':
+            h_out, _ = rnn_step_forward(x_in, h_in, Wx, Wh, b)
+          #elif self.cell_type == 'lstm':
+          #  h_out, cache_rnn = lstm_forward(x, h0, Wx, Wh, b)
+
+          # (3) affine transformation : compute scores at this time step (N,V)
+          scores, _ = affine_forward(h_out, W_vocab, b_vocab)
+
+          # (4) Select the word with the highest score as the next word, writing it 
+          #   (the word index) to the appropriate slot in the captions variable
+          captions0 = np.argmax(scores, axis=1)
+          captions[:,t] = captions0
+          h_in = h_out
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
