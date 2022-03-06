@@ -27,7 +27,7 @@ class PositionalEncoding(nn.Module):
         assert embed_dim % 2 == 0
         # Create an array with a "batch dimension" of 1 (which will broadcast
         # across all examples in the batch).
-        pe = torch.zeros(1, max_len, embed_dim)
+        pe = torch.zeros(1, max_len, embed_dim) # (1, max_S, D)
         ############################################################################
         # TODO: Construct the positional encoding array as described in            #
         # Transformer_Captioning.ipynb.  The goal is for each row to alternate     #
@@ -38,7 +38,11 @@ class PositionalEncoding(nn.Module):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        position = torch.arange(0, max_len).unsqueeze(1) # (max_S,1)
+        exp_term = torch.exp(torch.arange(0, embed_dim, 2) * -(math.log(10000) / embed_dim))
+        pe[:, :, 0::2] = torch.sin(position * exp_term)
+        pe[:, :, 1::2] = torch.cos(position * exp_term)
+        # ref : https://github.com/mingstellar/
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -70,7 +74,8 @@ class PositionalEncoding(nn.Module):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        output = x + self.pe[:,:S,:]
+        output = self.dropout(output)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -126,7 +131,9 @@ class MultiHeadAttention(nn.Module):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        self.num_heads = num_heads
+        self.dropout = nn.Dropout(p=dropout) # different class;
+        self.scalar = torch.sqrt( torch.Tensor([embed_dim/num_heads]) )
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
@@ -174,7 +181,27 @@ class MultiHeadAttention(nn.Module):
         ############################################################################
         # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-        pass
+        H = self.num_heads
+        DH = int(D/H) # dimension for each head
+
+        # 1) Split the dimension (N, T, E) → (N, T, H, E/H) → (N, H, T, E/H)
+        XQ = self.query(query).reshape(N, S, H, DH).permute(0, 2, 1, 3)
+        XK = self.key(key).reshape(N, T, H, DH).permute(0, 2, 1, 3)
+        XV = self.value(value).reshape(N, T, H, DH).permute(0, 2, 1, 3)
+
+        # 2) batched matrix multiply using torch.matmul
+        #    (N, H, T, E/H) dot (N, H, E/H, T) = scores (N, H, T, T)
+        scores = torch.matmul(XQ, XK.permute(0, 1, 3, 2)) / self.scalar
+
+        # 3) applying attn_mask with torch.masked_fill
+        if attn_mask is not None:
+            scores = scores.masked_fill(attn_mask==0, -float('inf'))
+        attention = self.dropout(torch.softmax(scores, dim=3)) #(N, H, T, T)
+
+        output = torch.matmul(attention, XV) #(N, H, T, DH)
+        output = output.permute(0, 2, 1, 3) # .contiguous()
+        output = output.reshape(N, T, D)
+        output = self.proj(output)
 
         # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
         ############################################################################
