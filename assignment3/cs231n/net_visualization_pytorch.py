@@ -34,7 +34,10 @@ def compute_saliency_maps(X, y, model):
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    X_out = model(X) # (N, C)
+    scores = X_out.gather(1, y.view(-1,1)).squeeze() #(N,)
+    scores.sum().backward() #grad computed and saved in X.grad (N,3,H,W)
+    saliency, _ = X.grad.abs().max(axis=1)
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -75,8 +78,28 @@ def make_fooling_image(X, target_y, model):
     # You can print your progress over iterations to check your algorithm.       #
     ##############################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
+    
+    print('target y : ', target_y)
+    ii = 0
+    argmax_bef = None
 
-    pass
+    while argmax_bef != target_y:
+      
+      ii += 1
+
+      X_fooling_out = model(X_fooling).squeeze() #(1,C)
+      target_score = X_fooling_out[target_y] # scalar
+      
+      argmax_aft = X_fooling_out.argmax().item()
+      if argmax_bef != argmax_aft :
+        print('argmax score : ', argmax_aft, ', iter : ', ii)
+        argmax_bef = argmax_aft
+      target_score.backward()
+      
+      with torch.no_grad() :
+        g = X_fooling.grad #(1,3,244,244)
+        dX_fooling = learning_rate * g / torch.sqrt(torch.sum(g**2))      
+        X_fooling += dX_fooling
 
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ##############################################################################
@@ -94,8 +117,19 @@ def class_visualization_update_step(img, model, target_y, l2_reg, learning_rate)
     ########################################################################
     # *****START OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
 
-    pass
+    
+    # img : (1, 3, 244, 244)
+    img_var = img.clone()
+    img_var.requires_grad_()
+    img_var.retain_grad()
+    prediction = model(img_var)
+    score = prediction[:, target_y] - l2_reg * torch.sqrt(torch.sum(img_var**2))
+    score.backward()
 
+    with torch.no_grad():
+        img_var += learning_rate * img_var.grad
+
+    return img_var
     # *****END OF YOUR CODE (DO NOT DELETE/MODIFY THIS LINE)*****
     ########################################################################
     #                             END OF YOUR CODE                         #
